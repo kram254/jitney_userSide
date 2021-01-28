@@ -1,85 +1,54 @@
-import 'dart:async';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_google_places/flutter_google_places.dart';
 import 'package:geocoder/geocoder.dart';
-import 'package:geoflutterfire/geoflutterfire.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
-import 'package:google_maps_webservice/places.dart';
+import 'package:provider/provider.dart';
 import 'package:jitney_userSide/helpers/constants.dart';
 import 'package:jitney_userSide/helpers/style.dart';
 import 'package:jitney_userSide/providers/app.dart';
-import 'package:provider/provider.dart';
-
+import "package:google_maps_webservice/places.dart";
 
 GoogleMapsPlaces places = GoogleMapsPlaces(apiKey: GOOGLE_MAPS_API_KEY);
 
-class HomeScreen extends StatefulWidget {
-HomeScreen({Key key, this.title}) : super(key: key);
-  final String title;
 
+class HomeScreen extends StatefulWidget {
+  HomeScreen({Key key, this.title}) : super(key: key);
+  final String title;
 
   @override
   _HomeScreenState createState() => _HomeScreenState();
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-var scaffoldState = GlobalKey<ScaffoldState>();
+  var scaffoldState = GlobalKey<ScaffoldState>();
 
   @override
   Widget build(BuildContext context) {
-    return   SafeArea(
+    return SafeArea(
       child: Scaffold(
           key: scaffoldState,
           drawer: Drawer(
-         child: ListView(
-           children: [
-             UserAccountsDrawerHeader(accountName: Text("Karios for now"), accountEmail: Text("karios@gmail.com")),
-           ],
-         ),
-       ),
-          body: MapScreen(scaffoldState),
+            child: Scaffold(
+              appBar: AppBar(
+                title: Text("Settings"),
+              ),
+            ),
           ),
+          body: Map(scaffoldState)),
     );
   }
-  }
-
-
-/**** 
-  final GlobalKey<ScaffoldState> _key = GlobalKey<ScaffoldState>();
-  @override
-  Widget build(BuildContext context) {
-    // using stacks so that we can add another widget on top of the other.
-    return Scaffold(
-      key: _key,
-       drawer: Drawer(
-         child: ListView(
-           children: [
-             UserAccountsDrawerHeader(accountName: Text("Karios for now"), accountEmail: Text("karios@gmail.com")),
-           ],
-         ),
-       ),
-
-          body: Stack(
-          children: [
-          MapScreen(scaffoldKey: _key),
-        ],
-      ),
-    );
-  
-  }
-  */
-  
-
-class MapScreen extends StatefulWidget {
-  final GlobalKey<ScaffoldState> scaffoldState;
-
-  MapScreen(this.scaffoldState);
-
-  @override
-  _MapScreenState createState() => _MapScreenState();
 }
 
-class _MapScreenState extends State<MapScreen> {
+class Map extends StatefulWidget {
+  final GlobalKey<ScaffoldState> scaffoldState;
+
+  Map(this.scaffoldState);
+
+  @override
+  _MapState createState() => _MapState();
+}
+
+class _MapState extends State<Map> {
   GoogleMapsPlaces googlePlaces;
   TextEditingController destinationController = TextEditingController();
   Color darkBlue = Colors.black;
@@ -104,13 +73,11 @@ class _MapScreenState extends State<MapScreen> {
             children: <Widget>[
               GoogleMap(
                 initialCameraPosition:
-                CameraPosition(target: appState.center, zoom: 13),
+                CameraPosition(target: appState.center, zoom: 15),
                 onMapCreated: appState.onCreate,
                 myLocationEnabled: true,
                 mapType: MapType.normal,
-                //compassEnabled: true,
-                tiltGesturesEnabled: true,
-                compassEnabled: false,
+                compassEnabled: true,
                 markers: appState.markers,
                 onCameraMove: appState.onCameraMove,
                 polylines: appState.poly,
@@ -128,7 +95,111 @@ class _MapScreenState extends State<MapScreen> {
                       scaffoldSate.currentState.openDrawer();
                     }),
               ),
+              Positioned(
+                top: 60.0,
+                right: 15.0,
+                left: 15.0,
+                child: Container(
+                  height: 120.0,
+                  width: double.infinity,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(8.0),
+                    color: Colors.white,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Color(0x88999999),
+                        offset: Offset(0, 5),
+                        blurRadius: 5.0,
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    children: <Widget>[
+                      TextField(
+                        cursorColor: Colors.blue.shade900,
+                        controller: appState.locationController,
+                        decoration: InputDecoration(
+                          icon: Container(
+                            margin: EdgeInsets.only(left: 20, top: 5),
+                            width: 10,
+                            height: 10,
+                            child: Icon(
+                              Icons.location_on,
+                              color: Primary,
+                            ),
+                          ),
+                          hintText: "pick up",
+                          border: InputBorder.none,
+                          contentPadding: EdgeInsets.only(left: 15.0, top: 16.0),
+                        ),
+                      ),
 
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8.0),
+                        child: TextField(
+                          onTap: ()async{
+                            Prediction p = await PlacesAutocomplete.show(
+                                context: context,
+                                apiKey: GOOGLE_MAPS_API_KEY,
+                                mode: Mode.overlay, // Mode.fullscreen
+                                language: "pt",
+                                components: [new Component(Component.country, "mz")]);
+
+//                            displayPrediction(p);
+                            PlacesDetailsResponse detail =
+                            await places.getDetailsByPlaceId(p.placeId);
+                            double lat = detail.result.geometry.location.lat;
+                            double lng = detail.result.geometry.location.lng;
+                            LatLng coordinates = LatLng(lat, lng);
+                            appState.sendRequest(coordinates: coordinates);
+                          },
+                          textInputAction: TextInputAction.go,
+//                          onSubmitted: (value) {
+//                            appState.sendRequest(intendedLocation: value);
+//                          },
+                          controller: destinationController,
+                          cursorColor: Colors.blue.shade900,
+                          decoration: InputDecoration(
+                            icon: Container(
+                              margin: EdgeInsets.only(left: 20, top: 5),
+                              width: 10,
+                              height: 10,
+                              child: Icon(
+                                Icons.local_taxi,
+                                color: Primary,
+                              ),
+                            ),
+                            hintText: "destination?",
+                            border: InputBorder.none,
+                            contentPadding: EdgeInsets.only(left: 15.0, top: 16.0),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              Positioned(
+                bottom: 60, right: 0, left: 0, height: 60,
+                child: Visibility(
+                  visible: appState.routeModel != null,
+                  child: Padding(
+                    padding: const EdgeInsets.only(left:15.0, right: 15.0),
+                    child: Container(
+                      color: Colors.white,
+                      child: Row(
+                         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                        children: <Widget>[
+                         FlatButton.icon(onPressed: (){}, icon: Icon(Icons.timer), label: Text("18 min")),
+                          FlatButton.icon(onPressed: (){}, icon: Icon(Icons.attach_money), label: Text("15"))
+
+
+                        ],
+                      ),
+                    ),
+                  ),
+                ),),
               Positioned(
                 bottom: 10,
                 left: 0,
@@ -138,17 +209,8 @@ class _MapScreenState extends State<MapScreen> {
                   height: 48,
                   child: Padding(
                     padding: const EdgeInsets.only(left:15.0, right: 15.0),
-                    child: RaisedButton(onPressed: ()async{
-                        GeoFirePoint point = GeoFirePoint(appState.center.latitude, appState.center.longitude);
-                        FirebaseFirestore.instance.collection("locations").add({
-                          "position": appState.position.toJson(),
-                          "name": "Driver"
-                        });
-                        print("working just fine");
-
-
-                    }, color: darkBlue,
-                      child: Text("Confirm Booking", style: TextStyle(color: Colors.white, fontSize: 16),),),
+                    child: RaisedButton(onPressed: (){}, color: darkBlue,
+                      child: Text("Confirm Booking", style: TextStyle(color: white, fontSize: 16),),),
                   ),
                 ),)
             ],

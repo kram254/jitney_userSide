@@ -1,116 +1,61 @@
 import 'dart:async';
 
-import 'package:geocoding/geocoding.dart';
-import 'package:geolocator/geolocator.dart';
-import 'package:jitney_userSide/helpers/constants.dart';
-import 'package:jitney_userSide/helpers/style.dart';
-import 'package:jitney_userSide/models/ride_Request.dart';
-import 'package:jitney_userSide/models/rider.dart';
-import 'package:jitney_userSide/models/route.dart';
-import 'package:jitney_userSide/services/map_requests.dart';
-import 'package:jitney_userSide/services/ride_request.dart';
-import 'package:jitney_userSide/services/rider.dart';
-import 'package:jitney_userSide/services/user.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
-import 'package:geolocator/geolocator.dart' as mark;
+import 'package:geocoding/geocoding.dart';
+import 'package:geoflutterfire/geoflutterfire.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
-import 'package:location/location.dart' as locator;
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:jitney_userSide/helpers/style.dart';
+import 'package:jitney_userSide/models/driver.dart';
+import 'package:jitney_userSide/models/route.dart';
+import 'package:jitney_userSide/services/drivers.dart';
+import 'package:jitney_userSide/services/map_requests.dart';
 import 'package:uuid/uuid.dart';
-import 'dart:typed_data';
 
-enum Show { RIDER, TRIP }
 
 class AppProvider with ChangeNotifier {
-  static const ACCEPTED = 'accepted';
-  static const CANCELLED = 'cancelled';
-  static const PENDING = 'pending';
-  static const EXPIRED = 'expired';
-  // ANCHOR: VARIABLES DEFINITION
   Set<Marker> _markers = {};
   Set<Polyline> _poly = {};
   GoogleMapsServices _googleMapsServices = GoogleMapsServices();
   GoogleMapController _mapController;
-  Position position;
+  Geoflutterfire geo = Geoflutterfire();
   static LatLng _center;
   LatLng _lastPosition = _center;
   TextEditingController _locationController = TextEditingController();
   TextEditingController destinationController = TextEditingController();
+  Position position;
+  DriverService _driverService = DriverService();
+
+  //   taxi pin
+  BitmapDescriptor pinLocationIcon;
 
   LatLng get center => _center;
+
   LatLng get lastPosition => _lastPosition;
+
   TextEditingController get locationController => _locationController;
+
   Set<Marker> get markers => _markers;
+
   Set<Polyline> get poly => _poly;
+
   GoogleMapController get mapController => _mapController;
   RouteModel routeModel;
-  SharedPreferences prefs;
-
-  locator.Location location = new locator.Location();
-  bool hasNewRideRequest = false;
-  UserServices _userServices = UserServices();
-  RideRequestModel rideRequestModel;
-  RequestModelFirebase requestModelFirebase;
-
-  RiderModel riderModel;
-  RiderServices _riderServices = RiderServices();
-  double distanceFromRider = 0;
-  double totalRideDistance = 0;
-  StreamSubscription<QuerySnapshot> requestStream;
-  int timeCounter = 0;
-  double percentage = 0;
-  Timer periodicTimer;
-  RideRequestServices _requestServices = RideRequestServices();
-  Show show;
 
   AppProvider() {
-//    _subscribeUser();
-    _saveDeviceToken();
-    fcm.configure(
-//      this callback is used when the app runs on the foreground
-        onMessage: handleOnMessage,
-//        used when the app is closed completely and is launched using the notification
-        onLaunch: handleOnLaunch,
-//        when its on the background and opened using the notification drawer
-        onResume: handleOnResume);
+    _setCustomMapPin();
     _getUserLocation();
-    Geolocator.getPositionStream().listen(_userCurrentLocationUpdate);
+    _driverService.getDrivers().listen(_updateMarkers);
   }
 
-  // ANCHOR LOCATION METHODS
-  _userCurrentLocationUpdate(Position updatedPosition) async {
-    double distance = await Geolocator.distanceBetween(
-        prefs.getDouble('lat'),
-        prefs.getDouble('lng'),
-        updatedPosition.latitude,
-        updatedPosition.longitude);
-    Map<String, dynamic> values = {
-      "id": prefs.getString("id"),
-      "position": updatedPosition.toJson()
-    };
-    if (distance >= 50) {
-      if(show == Show.RIDER){
-        sendRequest(coordinates: requestModelFirebase.getCoordinates());
-      }
-      _userServices.updateUserData(values);
-      await prefs.setDouble('lat', updatedPosition.latitude);
-      await prefs.setDouble('lng', updatedPosition.longitude);
-    }
-  }
-
-  _getUserLocation() async {
-    prefs = await SharedPreferences.getInstance();
+  Future<Position> _getUserLocation() async {
     position = await Geolocator.getCurrentPosition();
     List<Placemark> placemark = await placemarkFromCoordinates(position.latitude, position.longitude);
     _center = LatLng(position.latitude, position.longitude);
-    await prefs.setDouble('lat', position.latitude);
-    await prefs.setDouble('lng', position.longitude);
     _locationController.text = placemark[0].name;
     notifyListeners();
+    return position;
   }
-
-  // ANCHOR MAPS METHODS
 
   onCreate(GoogleMapController controller) {
     _mapController = controller;
@@ -124,17 +69,38 @@ class AppProvider with ChangeNotifier {
 
   onCameraMove(CameraPosition position) {
     _lastPosition = position.target;
+  }
+
+  _addLocationMarker(LatLng position, String destination, String distance) {
+//    _markers.clear();
+    var uuid = new Uuid();
+    String markerId = uuid.v1();
+    _markers.add(Marker(
+        markerId: MarkerId(markerId),
+        position: position,
+        infoWindow: InfoWindow(title: destination, snippet: distance),
+        icon: BitmapDescriptor.defaultMarker));
     notifyListeners();
   }
 
-  void sendRequest({String intendedLocation, LatLng coordinates}) async {
-    LatLng origin = LatLng(position.latitude, position.longitude);
+  void _addDriverMarker({LatLng position, double rotation, String driverId}) {
+    _markers.add(Marker(
+        markerId: MarkerId(driverId),
+        position: position,
+        rotation: rotation,
+        draggable: false,
+        zIndex: 2,
+        flat: true,
+        anchor: Offset(0.5, 0.5),
+        icon: pinLocationIcon));
+  }
 
+  void sendRequest({String intendedLocation, LatLng coordinates}) async {
     LatLng destination = coordinates;
     RouteModel route =
-        await _googleMapsServices.getRouteByCoordinates(origin, destination);
+        await _googleMapsServices.getRouteByCoordinates(_center, destination);
     routeModel = route;
-    addLocationMarker(
+    _addLocationMarker(
         destination, routeModel.endAddress, routeModel.distance.text);
     _center = destination;
     destinationController.text = routeModel.endAddress;
@@ -144,12 +110,12 @@ class AppProvider with ChangeNotifier {
   }
 
   void _createRoute(String decodeRoute) {
-    _poly = {};
+    _poly.clear();
     var uuid = new Uuid();
     String polyId = uuid.v1();
     poly.add(Polyline(
         polylineId: PolylineId(polyId),
-        width: 8,
+        width: 12,
         color: Primary,
         onTap: () {},
         points: _convertToLatLong(_decodePoly(decodeRoute))));
@@ -200,129 +166,49 @@ class AppProvider with ChangeNotifier {
     return lList;
   }
 
-  // ANCHOR MARKERS
-  addLocationMarker(LatLng position, String destination, String distance) {
-    _markers = {};
-    var uuid = new Uuid();
-    String markerId = uuid.v1();
-    _markers.add(Marker(
-        markerId: MarkerId(markerId),
-        position: position,
-        infoWindow: InfoWindow(title: destination, snippet: distance),
-        icon: BitmapDescriptor.defaultMarker));
-    notifyListeners();
-  }
+//  _getDrivers({Position userPosition}) async {
+//    geo
+//        .collection(collectionRef: Firestore.instance.collection("locations"))
+//        .within(
+//            center: GeoFirePoint(userPosition.latitude, userPosition.longitude),
+//            radius: 20,
+//            field: "geolocation",
+//    strictMode: true).listen(_updateMarkers);
+//  }
 
-  Future<Uint8List> getMarker(BuildContext context) async {
-    ByteData byteData =
-        await DefaultAssetBundle.of(context).load("images/car.png");
-    return byteData.buffer.asUint8List();
-  }
+  _updateMarkers(List<DriverModel> drivers) {
+    drivers.forEach((DriverModel driver) {
+      print("DRIVER AME IS: ${driver.name}");
+      print("DRIVER AME IS: ${driver.name}");
+      print("DRIVER AME IS: ${driver.name}");
+      print("DRIVER AME IS: ${driver.name}");
+      print("DRIVER AME IS: ${driver.name}");
+      print("DRIVER AME IS: ${driver.name}");
+      print("DRIVER AME IS: ${driver.name}");
+      print("DRIVER AME IS: ${driver.name}");
+      print("DRIVER AME IS: ${driver.name}");
+      print("DRIVER AME IS: ${driver.name}");
+      print("DRIVER AME IS: ${driver.name}");
+      print("DRIVER AME IS: ${driver.name}");
+      print("DRIVER AME IS: ${driver.name}");
+      print("DRIVER AME IS: ${driver.name}");
+      print("DRIVER AME IS: ${driver.name}");
+      print("DRIVER AME IS: ${driver.name}");
+      print("DRIVER AME IS: ${driver.name}");
+      print("DRIVER AME IS: ${driver.name}");
+      print("DRIVER AME IS: ${driver.name}");
+      print("DRIVER AME IS: ${driver.name}");
 
-  clearMarkers() {
-    _markers.clear();
-    notifyListeners();
-  }
-
-  _saveDeviceToken() async {
-    prefs = await SharedPreferences.getInstance();
-    if (prefs.getString('token') == null) {
-      String deviceToken = await fcm.getToken();
-      await prefs.setString('token', deviceToken);
-    }
-  }
-
-// ANCHOR PUSH NOTIFICATION METHODS
-  Future handleOnMessage(Map<String, dynamic> data) async {
-    _handleNotificationData(data);
-  }
-
-  Future handleOnLaunch(Map<String, dynamic> data) async {
-    _handleNotificationData(data);
-  }
-
-  Future handleOnResume(Map<String, dynamic> data) async {
-    _handleNotificationData(data);
-  }
-
-  _handleNotificationData(Map<String, dynamic> data) async {
-    hasNewRideRequest = true;
-    rideRequestModel = RideRequestModel.fromMap(data['data']);
-    riderModel = await _riderServices.getRiderById(rideRequestModel.userId);
-    notifyListeners();
-  }
-
-// ANCHOR RIDE REQUEST METHODS
-  changeRideRequestStatus() {
-    hasNewRideRequest = false;
-    notifyListeners();
-  }
-
-  listenToRequest({String id, BuildContext context}) async {
-//    requestModelFirebase = await _requestServices.getRequestById(id);
-    print("======= LISTENING =======");
-    requestStream = _requestServices.requestStream().listen((querySnapshot) {
-      querySnapshot.docChanges.forEach((doc) {
-        if (doc.doc.data()['id'] == id) {
-          requestModelFirebase = RequestModelFirebase.fromSnapshot(doc.doc);
-          notifyListeners();
-          switch (doc.doc.data()['status']) {
-            case CANCELLED:
-              print("====== CANCELELD");
-              break;
-            case ACCEPTED:
-              print("====== ACCEPTED");
-              break;
-            case EXPIRED:
-              print("====== EXPIRED");
-              break;
-            default:
-              print("==== PENDING");
-              break;
-          }
-        }
-      });
+      _addDriverMarker(
+        driverId: driver.id,
+          position: LatLng(driver.position.lat,
+              driver.position.lng),
+          rotation: driver.position.heading);
     });
   }
 
-/*** 
-  //  Timer counter for driver request
-  percentageCounter({String requestId, BuildContext context}) {
-    notifyListeners();
-    periodicTimer = Timer.periodic(Duration(seconds: 1), (time) {
-      timeCounter = timeCounter + 1;
-      percentage = timeCounter / 100;
-      print("====== GOOOO $timeCounter");
-      if (timeCounter == 100) {
-        timeCounter = 0;
-        percentage = 0;
-        time.cancel();
-        hasNewRideRequest = false;
-        requestStream.cancel();
-      }
-      notifyListeners();
-    });
+  _setCustomMapPin() async {
+    pinLocationIcon = await BitmapDescriptor.fromAssetImage(
+        ImageConfiguration(devicePixelRatio: 2.5), 'images/car.png');
   }
-  */
-
-  acceptRequest({String requestId, String driverId}) {
-    hasNewRideRequest = false;
-    _requestServices.updateRequest(
-        {"id": requestId, "status": "accepted", "driverId": driverId});
-    notifyListeners();
-  }
-
-  cancelRequest({String requestId}) {
-    hasNewRideRequest = false;
-    _requestServices.updateRequest({"id": requestId, "status": "cancelled"});
-    notifyListeners();
-  }
-
-  //  ANCHOR UI METHODS
-  changeWidgetShowed({Show showWidget}) {
-    show = showWidget;
-    notifyListeners();
-  }
-
-  static initialize() {}
 }
