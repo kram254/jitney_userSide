@@ -7,9 +7,19 @@ import 'package:jitney_userSide/helpers/constants.dart';
 import 'package:jitney_userSide/helpers/style.dart';
 import 'package:jitney_userSide/providers/app.dart';
 import "package:google_maps_webservice/places.dart";
-
-GoogleMapsPlaces places = GoogleMapsPlaces(apiKey: GOOGLE_MAPS_API_KEY);
-
+import 'package:flutter_spinkit/flutter_spinkit.dart';
+import 'package:percent_indicator/linear_percent_indicator.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:jitney_userSide/helpers/navigation.dart';
+import 'package:jitney_userSide/providers/user.dart';
+import 'package:jitney_userSide/widgets/custom_txt.dart';
+import 'package:jitney_userSide/widgets/destination_selection.dart';
+import 'package:jitney_userSide/widgets/driver_found.dart';
+import 'package:jitney_userSide/widgets/loading.dart';
+import 'package:jitney_userSide/widgets/payment_method_selection.dart';
+import 'package:jitney_userSide/widgets/pickup_selection_widget.dart';
+import 'package:jitney_userSide/widgets/trip_draggable.dart';
+import 'login.dart';
 
 class HomeScreen extends StatefulWidget {
   HomeScreen({Key key, this.title}) : super(key: key);
@@ -23,19 +33,151 @@ class _HomeScreenState extends State<HomeScreen> {
   var scaffoldState = GlobalKey<ScaffoldState>();
 
   @override
+  void initState() {
+    super.initState();
+    _deviceToken();
+  }
+
+  _deviceToken() async {
+    SharedPreferences preferences = await SharedPreferences.getInstance();
+    UserProvider _user = Provider.of<UserProvider>(context, listen: false);
+
+    if (_user.userModel?.token != preferences.getString('token')) {
+      Provider.of<UserProvider>(context, listen: false).saveDeviceToken();
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    UserProvider userProvider = Provider.of<UserProvider>(context);
+    AppProvider appState = Provider.of<AppProvider>(context);
     return SafeArea(
       child: Scaffold(
           key: scaffoldState,
           drawer: Drawer(
-            child: Scaffold(
-              appBar: AppBar(
-                title: Text("Settings"),
+            child: ListView(
+          children: [
+            UserAccountsDrawerHeader(
+                accountName: CustomText(
+                  text: userProvider.userModel?.name ?? "This is null",
+                  size: 18,
+                  weight: FontWeight.bold,
+                ),
+                accountEmail: CustomText(
+                  text: userProvider.userModel?.email ?? "This is null",
+                )),
+            ListTile(
+              leading: Icon(Icons.exit_to_app),
+              title: CustomText(text: "Log out"),
+              onTap: () {
+                userProvider.signOut();
+                changeScreenReplacement(context, LoginScreen());
+              },
+            )
+          ],
+        )),
+          body: Stack(
+          children: [
+            Map(scaffoldState),
+            Visibility(
+              visible: appState.show == Show.DRIVER_FOUND,
+              child: Positioned(
+                  top: 60,
+                  left: 15,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 30),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Container(
+                          child: appState.driverArrived ? Container(
+                            color: Colors.green,
+                            child: Padding(
+                              padding: const EdgeInsets.all(16),
+                              child: CustomText(
+                                text: "Meet driver at the pick up location",
+                                color: Colors.white,
+                              ),
+                            ),
+                          ) : Container(
+                            color: Primary,
+                            child: Padding(
+                              padding: const EdgeInsets.all(16),
+                              child: CustomText(
+                                text: "Meet driver at the pick up location",
+                                weight: FontWeight.w300,
+                                color: white,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  )),
+            ),
+            Visibility(
+              visible: appState.show == Show.TRIP,
+              child: Positioned(
+                  top: 60,
+                  left: MediaQuery.of(context).size.width / 7,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 30),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Container(
+                          child: Container(
+                            color: Primary,
+                            child: Padding(
+                              padding: const EdgeInsets.all(16),
+                              child: RichText(text: TextSpan(
+                                children: [
+                                  TextSpan(
+                                    text: "You\'ll reach your destination in \n",
+                                    style: TextStyle(fontWeight: FontWeight.w300)
+                                  ),
+                                  TextSpan(
+                                      text: appState.routeModel?.timeNeeded?.text ?? "",
+                                      style: TextStyle(fontSize: 22)
+                                  ),
+                                ]
+                              ))
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  )),
+            ),
+            // ANCHOR Draggable
+            Visibility(
+                visible: appState.show == Show.DESTINATION_SELECTION,
+                child: DestinationSelectionWidget()),
+            // ANCHOR PICK UP WIDGET
+            Visibility(
+              visible: appState.show == Show.PICKUP_SELECTION,
+              child: PickupSelectionWidget(
+                scaffoldState: scaffoldState,
               ),
             ),
-          ),
-          body: Map(scaffoldState)),
-    );
+            //  ANCHOR Draggable PAYMENT METHOD
+            Visibility(
+                visible: appState.show == Show.PAYMENT_METHOD_SELECTION,
+                child: PaymentMethodSelectionWidget(
+                  scaffoldState: scaffoldState,
+                )),
+            //  ANCHOR Draggable DRIVER
+            Visibility(
+                visible: appState.show == Show.DRIVER_FOUND,
+                child: DriverFoundWidget()),
+
+            //  ANCHOR Draggable DRIVER
+            Visibility(
+                visible: appState.show == Show.TRIP,
+                child: TripWidget()),
+          ],
+        ),
+    ));
   }
 }
 
@@ -64,11 +206,10 @@ class _MapState extends State<Map> {
   @override
   Widget build(BuildContext context) {
     AppProvider appState = Provider.of<AppProvider>(context);
+    UserProvider userProvider = Provider.of<UserProvider>(context);
+
     return appState.center == null
-        ? Container(
-            alignment: Alignment.center,
-            child: Center(child: CircularProgressIndicator()),
-          )
+        ? Loading()
         : Stack(
             children: <Widget>[
               GoogleMap(
@@ -78,6 +219,7 @@ class _MapState extends State<Map> {
                 myLocationEnabled: true,
                 mapType: MapType.normal,
                 compassEnabled: true,
+                rotateGesturesEnabled: true,
                 markers: appState.markers,
                 onCameraMove: appState.onCameraMove,
                 polylines: appState.poly,
@@ -95,7 +237,8 @@ class _MapState extends State<Map> {
                       scaffoldSate.currentState.openDrawer();
                     }),
               ),
-              Positioned(
+              /**
+               * Positioned(
                 top: 60.0,
                 right: 15.0,
                 left: 15.0,
@@ -213,9 +356,11 @@ class _MapState extends State<Map> {
                       child: Text("Confirm Booking", style: TextStyle(color: white, fontSize: 16),),),
                   ),
                 ),)
+                **** */
             ],
           );
   }
+  
 
   Future<Null> displayPrediction(Prediction p) async {
        if (p != null) {

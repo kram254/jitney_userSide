@@ -2,13 +2,12 @@ import 'package:jitney_userSide/helpers/constants.dart';
 import 'package:jitney_userSide/models/user.dart';
 
 class UserServices{
-  String collection = "drivers";
+  String collection = "users";
 
-  void createUser({
-  String id,
-  String name,
+  void createUser({String id,  String name,
   String email,
   String phone,
+  int votes = 0,
   int trips = 0,
   double rating = 0,
   Map position}) {
@@ -17,6 +16,7 @@ class UserServices{
       "id": id,
       "phone": phone,
       "email": email,
+      "votes": votes,
       "trips": trips,
       "rating": rating,
       "position": position
@@ -30,5 +30,11 @@ class UserServices{
   Future<UserModel> getUserById(String id) => firebaseFiretore.collection(collection).doc(id).get().then((doc){
     return UserModel.fromSnapshot(doc);
   });
+
+  void addDeviceToken({String token, String userId}){
+    firebaseFiretore.collection(collection).doc(userId).update({
+      "token": token
+    });
+  }
 
 }
